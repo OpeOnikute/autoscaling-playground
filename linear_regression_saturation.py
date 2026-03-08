@@ -18,6 +18,7 @@ GD being worse than CF. This script now uses a larger lr and early-stop so
 GD converges to match closed-form.
 """
 
+import re
 import sys
 import warnings
 from pathlib import Path
@@ -124,6 +125,12 @@ def iter_candidate_scenarios(
         if len(y) < 5:
             continue
         yield stem, X, y
+
+
+def scenario_duration_minutes(stem: str) -> int | None:
+    """Parse scenario stem for duration, e.g. 'cpu_aug12_25min_200_0_graph_2' -> 25. Returns None if not found."""
+    m = re.search(r"(\d+)min", stem, re.IGNORECASE)
+    return int(m.group(1)) if m else None
 
 
 def baseline_end_index(y: np.ndarray, percentile: float = 75, min_windows: int = 5) -> int:
@@ -272,6 +279,44 @@ def main():
             mse_gd = np.mean((y - pred_gd) ** 2)
             print(f"  [{i + 1}] {stem}: n={n}  MSE(cf)={mse_cf:.1f}  MSE(gd)={mse_gd:.1f}")
 
+        # When baseline-only: predict each feature and latency 30 min from threshold (in real minutes, not fixed 30 windows)
+        pred_30min = None
+        if args.baseline_only and n_fit >= 5:
+            MINUTES_FROM_THRESHOLD = 30
+            duration_min = scenario_duration_minutes(stem)
+            if duration_min and n > 0:
+                windows_per_min = n / duration_min
+                num_windows_30min = int(round(MINUTES_FROM_THRESHOLD * windows_per_min))
+            else:
+                num_windows_30min = MINUTES_FROM_THRESHOLD  # fallback: 1 window/min
+            t_baseline = np.arange(n_fit, dtype=float)
+            cpu_b, net_rx_b, net_tx_b = X_fit[:, 1], X_fit[:, 2], X_fit[:, 3]
+            t_30 = n_fit + num_windows_30min
+            cpu_30 = np.polyval(np.polyfit(t_baseline, cpu_b, 1), t_30)
+            net_rx_30 = np.polyval(np.polyfit(t_baseline, net_rx_b, 1), t_30)
+            net_tx_30 = np.polyval(np.polyfit(t_baseline, net_tx_b, 1), t_30)
+            row = [1.0, cpu_30, net_rx_30, net_tx_30]
+            if args.poly:
+                row.extend([cpu_30**2, net_rx_30**2, net_tx_30**2])
+            if args.log:
+                row.extend([np.log1p(cpu_30), np.log1p(net_rx_30), np.log1p(net_tx_30)])
+            X_30 = np.array(row).reshape(1, -1)
+            lat_30_cf = (X_30 @ theta_cf).item()
+            X_30_gd = X_30.copy()
+            X_30_gd[:, 1:] = (X_30[:, 1:] - X_fit[:, 1:].mean(axis=0)) / (X_fit[:, 1:].std(axis=0) + 1e-8)
+            lat_30_gd_raw = (X_30_gd @ theta_gd).item() * y_std + y_mean
+            lat_30_gd = np.expm1(lat_30_gd_raw) if args.log_target else lat_30_gd_raw
+            lat_30_cf = np.expm1(lat_30_cf) if args.log_target else lat_30_cf
+            pred_30min = {
+                "t_30": t_30,
+                "cpu": cpu_30,
+                "net_rx_mb": net_rx_30,
+                "net_tx_mb": net_tx_30,
+                "latency_cf_ms": lat_30_cf,
+                "latency_gd_ms": lat_30_gd,
+            }
+            print(f"       Predicted 30 min from threshold: CPU={cpu_30:.3f}  net_rx={net_rx_30:.2f} MB  net_tx={net_tx_30:.2f} MB  latency(cf)={lat_30_cf:.1f} ms  latency(gd)={lat_30_gd:.1f} ms")
+
         x_idx = np.arange(n)
         fig, ax = plt.subplots(figsize=(10, 4))
         ax.plot(x_idx, y, label="Actual latency (ms)", color="black", alpha=0.7, linewidth=0.8)
@@ -279,6 +324,18 @@ def main():
         ax.plot(x_idx, pred_gd, label="Predicted (gradient descent)", color="C1", alpha=0.8, linewidth=0.8)
         if args.baseline_only:
             ax.axvline(n_fit - 0.5, color="gray", linestyle="--", alpha=0.7, label="Baseline end (fit region)")
+        if pred_30min:
+            t_30 = pred_30min["t_30"]
+            ax.axvline(t_30 - 0.5, color="green", linestyle=":", alpha=0.8, label="30 min from threshold")
+            ax.scatter([t_30], [pred_30min["latency_cf_ms"]], color="C0", s=80, zorder=5, marker="o", edgecolors="black", linewidths=0.5, label="Predicted 30 min (CF)")
+            ax.scatter([t_30], [pred_30min["latency_gd_ms"]], color="C1", s=80, zorder=5, marker="s", edgecolors="black", linewidths=0.5, label="Predicted 30 min (GD)")
+            label_lines = [
+                f"30 min from threshold (baseline extrapolation):",
+                f"  CPU = {pred_30min['cpu']:.3f}  net_rx = {pred_30min['net_rx_mb']:.2f} MB  net_tx = {pred_30min['net_tx_mb']:.2f} MB",
+                f"  Predicted latency (CF) = {pred_30min['latency_cf_ms']:.1f} ms  (GD) = {pred_30min['latency_gd_ms']:.1f} ms",
+            ]
+            ax.text(0.02, 0.98, "\n".join(label_lines), transform=ax.transAxes, fontsize=8,
+                    verticalalignment="top", bbox=dict(boxstyle="round", facecolor="wheat", alpha=0.8))
         ax.set_xlabel("Window index")
         ax.set_ylabel("Latency (ms)")
         title = f"Linear regression: {stem}"
