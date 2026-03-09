@@ -14,6 +14,10 @@ pip install -r requirements.txt
 
 Place the **processed** dataset at `processed_dataset/` (or pass `--data-dir`). Layout expected: `processed_dataset/{user,home,compose}/multi-modal-data-separate/*.csv`.
 
+## Notebook
+
+**[notebooks/traffic_forecasting.ipynb](notebooks/traffic_forecasting.ipynb)** — Interactive walkthrough: gradient descent vs closed-form, Model 1 (predict CPU from time), Model 2 (predict latency from CPU/network, baseline-only), and end-to-end forecast (CPU in 30 min → latency). Includes sliders to tune learning rate and epochs. Run from project root; needs `processed_dataset/` and `scenarios/` with at least one `<c-latency>-*` scenario.
+
 ## Scripts
 
 | Script | Purpose |

@@ -292,9 +292,12 @@ def main():
             t_baseline = np.arange(n_fit, dtype=float)
             cpu_b, net_rx_b, net_tx_b = X_fit[:, 1], X_fit[:, 2], X_fit[:, 3]
             t_30 = n_fit + num_windows_30min
-            cpu_30 = np.polyval(np.polyfit(t_baseline, cpu_b, 1), t_30)
+            poly_cpu = np.polyfit(t_baseline, cpu_b, 1)
+            cpu_30 = np.polyval(poly_cpu, t_30)
             net_rx_30 = np.polyval(np.polyfit(t_baseline, net_rx_b, 1), t_30)
             net_tx_30 = np.polyval(np.polyfit(t_baseline, net_tx_b, 1), t_30)
+            t_cpu = np.arange(0, t_30 + 1, dtype=float)
+            cpu_pred_curve = np.polyval(poly_cpu, t_cpu)
             row = [1.0, cpu_30, net_rx_30, net_tx_30]
             if args.poly:
                 row.extend([cpu_30**2, net_rx_30**2, net_tx_30**2])
@@ -309,6 +312,9 @@ def main():
             lat_30_cf = np.expm1(lat_30_cf) if args.log_target else lat_30_cf
             pred_30min = {
                 "t_30": t_30,
+                "t_cpu": t_cpu,
+                "cpu_pred": cpu_pred_curve,
+                "poly_cpu": poly_cpu,
                 "cpu": cpu_30,
                 "net_rx_mb": net_rx_30,
                 "net_tx_mb": net_tx_30,
@@ -318,14 +324,23 @@ def main():
             print(f"       Predicted 30 min from threshold: CPU={cpu_30:.3f}  net_rx={net_rx_30:.2f} MB  net_tx={net_tx_30:.2f} MB  latency(cf)={lat_30_cf:.1f} ms  latency(gd)={lat_30_gd:.1f} ms")
 
         x_idx = np.arange(n)
-        fig, ax = plt.subplots(figsize=(10, 4))
+        if pred_30min:
+            fig, (ax, ax_cpu) = plt.subplots(2, 1, figsize=(10, 6), sharex=True)
+            t_30 = pred_30min["t_30"]
+            duration_min = scenario_duration_minutes(stem)
+            extra_windows = int(round(10 * (n / duration_min))) if duration_min and n > 0 else 10
+            x_max = t_30 + extra_windows
+            ax.set_xlim(0, x_max)
+            t_cpu_ext = np.arange(0, x_max + 1, dtype=float)
+            cpu_pred_ext = np.polyval(pred_30min["poly_cpu"], t_cpu_ext)
+        else:
+            fig, ax = plt.subplots(figsize=(10, 4))
         ax.plot(x_idx, y, label="Actual latency (ms)", color="black", alpha=0.7, linewidth=0.8)
         ax.plot(x_idx, pred_cf, label="Predicted (closed-form)", color="C0", alpha=0.8, linewidth=0.8)
         ax.plot(x_idx, pred_gd, label="Predicted (gradient descent)", color="C1", alpha=0.8, linewidth=0.8)
         if args.baseline_only:
             ax.axvline(n_fit - 0.5, color="gray", linestyle="--", alpha=0.7, label="Baseline end (fit region)")
         if pred_30min:
-            t_30 = pred_30min["t_30"]
             ax.axvline(t_30 - 0.5, color="green", linestyle=":", alpha=0.8, label="30 min from threshold")
             ax.scatter([t_30], [pred_30min["latency_cf_ms"]], color="C0", s=80, zorder=5, marker="o", edgecolors="black", linewidths=0.5, label="Predicted 30 min (CF)")
             ax.scatter([t_30], [pred_30min["latency_gd_ms"]], color="C1", s=80, zorder=5, marker="s", edgecolors="black", linewidths=0.5, label="Predicted 30 min (GD)")
@@ -336,7 +351,14 @@ def main():
             ]
             ax.text(0.02, 0.98, "\n".join(label_lines), transform=ax.transAxes, fontsize=8,
                     verticalalignment="top", bbox=dict(boxstyle="round", facecolor="wheat", alpha=0.8))
-        ax.set_xlabel("Window index")
+            ax_cpu.plot(t_cpu_ext, cpu_pred_ext, color="C2", alpha=0.9, linewidth=1, label="Predicted CPU (baseline trend)")
+            ax_cpu.axvline(n_fit - 0.5, color="gray", linestyle="--", alpha=0.7, label="Baseline end")
+            ax_cpu.axvline(t_30 - 0.5, color="green", linestyle=":", alpha=0.8, label="30 min from threshold")
+            ax_cpu.set_ylabel("CPU")
+            ax_cpu.set_title("Predicted CPU (linear extrapolation to 30 min from threshold)")
+            ax_cpu.legend(loc="lower right")
+            ax_cpu.grid(True, alpha=0.3)
+        ax.set_xlabel("Window index" if not pred_30min else "")
         ax.set_ylabel("Latency (ms)")
         title = f"Linear regression: {stem}"
         if args.baseline_only:

@@ -14,3 +14,5 @@ __pycache__/
 .venv/
 .DS_Store
 *.png
+
+.ipynb_checkpoints/

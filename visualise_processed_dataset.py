@@ -96,69 +96,71 @@ def aggregate_by_window(df: pd.DataFrame, metric_cols: dict) -> pd.DataFrame:
 
 def plot_time_series(win: pd.DataFrame, metric_cols: dict, out_path: Path | None = None, single_png_path: Path | None = None, show: bool = True):
     """Plot CPU, memory, net RX, net TX, and latency per service over time."""
-    x = win["_time_rel_s"].values  # seconds since first window
+    if "_time_rel_s" in win.columns:
+        x = win["_time_rel_s"].values  # seconds since first window
+        xlabel = "Time (seconds since start)"
+    else:
+        x = np.arange(len(win))  # fallback when win from aggregate_by_window without timestamps
+        xlabel = "Window index"
     fig, axes = plt.subplots(2, 3, figsize=(14, 8))
-    fig.suptitle("Metrics over time (one line per span; aggregated by window)", fontsize=12)
+    fig.suptitle("Metrics over time (one line per service; aggregated by window)", fontsize=12)
 
-    # CPU: one subplot, all spans (same graph)
+    # 1. CPU usage per service
     ax = axes[0, 0]
     for c in metric_cols["cpu"]:
         ax.plot(x, win[c], alpha=0.7, label=c.split("_")[0])
     ax.set_ylabel("CPU (seconds total)")
-    ax.set_title("CPU usage per span")
-    ax.legend(loc="upper right", fontsize=7)
+    ax.set_title("CPU usage per service")
+    if metric_cols["cpu"]:
+        ax.legend(loc="upper right", fontsize=7)
     ax.grid(True, alpha=0.3)
 
-    # Memory: one subplot, all spans (same graph)
+    # 2. Latency per service
     ax = axes[0, 1]
-    for c in metric_cols["memory"]:
-        ax.plot(x, win[c] / 1e6, alpha=0.7, label=c.split("_")[0])  # MB
-    ax.set_ylabel("Memory (MB)")
-    ax.set_title("Memory usage per span")
-    ax.legend(loc="upper right", fontsize=7)
-    ax.grid(True, alpha=0.3)
-
-    # Latency per service (span) over time
-    ax = axes[0, 2]
     for c in metric_cols["latency"]:
         ax.plot(x, win[c] / 1e3, alpha=0.7, label=c.replace("_latency", ""))  # µs -> ms
     ax.set_ylabel("Latency (ms)")
-    ax.set_title("Latency per service (span)")
-    ax.legend(loc="upper right", fontsize=7)
+    ax.set_title("Latency per service")
+    if metric_cols["latency"]:
+        ax.legend(loc="upper right", fontsize=7)
     ax.grid(True, alpha=0.3)
 
-    # Network RX + TX on same graph (one subplot)
+    # 3. Network receive per service
+    ax = axes[0, 2]
+    for c in metric_cols["network_rx"]:
+        ax.plot(x, win[c] / 1e6, alpha=0.7, label=c.split("_")[0])  # MB
+    ax.set_ylabel("Network RX (MB)")
+    ax.set_title("Network receive per service")
+    if metric_cols["network_rx"]:
+        ax.legend(loc="upper right", fontsize=7)
+    ax.grid(True, alpha=0.3)
+
+    # 4. Network RX+TX across services
     ax = axes[1, 0]
     rx_mean = win[metric_cols["network_rx"]].mean(axis=1) / 1e6  # MB
     tx_mean = win[metric_cols["network_tx"]].mean(axis=1) / 1e6
     ax.plot(x, rx_mean, label="Network RX (mean)", color="C0")
     ax.plot(x, tx_mean, label="Network TX (mean)", color="C1")
     ax.set_ylabel("Bytes (MB)")
-    ax.set_title("Network RX vs TX (mean across spans)")
+    ax.set_title("Network RX+TX across services")
     ax.legend()
     ax.grid(True, alpha=0.3)
 
-    # Mean total latency over time
+    # 5. Total latency
     ax = axes[1, 1]
     total_latency = win["_total_latency"] / 1e3  # ms
     ax.plot(x, total_latency, color="C2", label="Mean total latency (ms)")
     ax.set_ylabel("Latency (ms)")
-    ax.set_title("Total request latency over time")
+    ax.set_title("Total latency")
     ax.legend()
     ax.grid(True, alpha=0.3)
 
-    # Network RX per span (one line per span)
-    ax = axes[1, 2]
-    for c in metric_cols["network_rx"]:
-        ax.plot(x, win[c] / 1e6, alpha=0.7, label=c.split("_")[0])  # MB
-    ax.set_ylabel("Network RX (MB)")
-    ax.set_title("Network receive per span")
-    ax.legend(loc="upper right", fontsize=7)
-    ax.grid(True, alpha=0.3)
+    # Hide unused panel
+    axes[1, 2].set_visible(False)
 
     for ax in axes.flat:
         if ax.get_visible():
-            ax.set_xlabel("Time (seconds since start)")
+            ax.set_xlabel(xlabel)
     plt.tight_layout()
     if single_png_path is not None:
         single_png_path.parent.mkdir(parents=True, exist_ok=True)
