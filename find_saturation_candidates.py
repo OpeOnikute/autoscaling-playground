@@ -20,7 +20,7 @@ import pandas as pd
 
 warnings.filterwarnings("ignore", category=pd.errors.PerformanceWarning)
 
-DEFAULT_DATA_DIR = Path("/Users/opeyemionikute/Downloads/archive/processed_dataset")
+DEFAULT_DATA_DIR = Path("./data/processed_dataset")
 SCENARIOS_DIR = Path(__file__).resolve().parent / "scenarios"
 CANDIDATE_PREFIX = "<c-latency>-"
 SERVICES = ("user", "home", "compose")

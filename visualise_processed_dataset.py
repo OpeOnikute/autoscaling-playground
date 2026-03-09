@@ -21,7 +21,7 @@ import numpy as np
 
 
 # Default path to processed dataset (override with --data-dir)
-DEFAULT_DATA_DIR = Path("/Users/opeyemionikute/Downloads/archive/processed_dataset")
+DEFAULT_DATA_DIR = Path("./data/processed_dataset")
 # Sample CSV: user service, one scenario (CPU bottleneck, 25min, 200 RPS)
 DEFAULT_CSV = "user/multi-modal-data-separate/cpu_aug12_25min_200_0_graph_2.csv"
 # Synthetic single-service linear dataset (2–6 h of data)

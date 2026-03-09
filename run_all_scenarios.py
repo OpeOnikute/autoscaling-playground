@@ -10,7 +10,7 @@ import sys
 from pathlib import Path
 
 # Same default as visualise_processed_dataset.py
-DEFAULT_DATA_DIR = Path("/Users/opeyemionikute/Downloads/archive/processed_dataset")
+DEFAULT_DATA_DIR = Path("./data/processed_dataset")
 SCRIPT_DIR = Path(__file__).resolve().parent
 SCENARIOS_DIR = SCRIPT_DIR / "scenarios"
 VIS_SCRIPT = SCRIPT_DIR / "visualise_processed_dataset.py"

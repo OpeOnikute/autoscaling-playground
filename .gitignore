@@ -16,3 +16,4 @@ __pycache__/
 *.png
 
 .ipynb_checkpoints/
+processed_dataset/
