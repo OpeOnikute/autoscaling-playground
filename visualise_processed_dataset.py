@@ -108,31 +108,34 @@ def plot_time_series(win: pd.DataFrame, metric_cols: dict, out_path: Path | None
     # 1. CPU usage per service
     ax = axes[0, 0]
     for c in metric_cols["cpu"]:
-        ax.plot(x, win[c], alpha=0.7, label=c.split("_")[0])
+        ax.plot(x, win[c], alpha=0.7)
     ax.set_ylabel("CPU (seconds total)")
     ax.set_title("CPU usage per service")
-    if metric_cols["cpu"]:
-        ax.legend(loc="upper right", fontsize=7)
+    n_cpu = len(metric_cols["cpu"])
+    if n_cpu:
+        ax.text(0.98, 0.98, f"{n_cpu} service{'s' if n_cpu != 1 else ''}", transform=ax.transAxes, ha="right", va="top", fontsize=9)
     ax.grid(True, alpha=0.3)
 
     # 2. Latency per service
     ax = axes[0, 1]
     for c in metric_cols["latency"]:
-        ax.plot(x, win[c] / 1e3, alpha=0.7, label=c.replace("_latency", ""))  # µs -> ms
+        ax.plot(x, win[c] / 1e3, alpha=0.7)  # µs -> ms
     ax.set_ylabel("Latency (ms)")
     ax.set_title("Latency per service")
-    if metric_cols["latency"]:
-        ax.legend(loc="upper right", fontsize=7)
+    n_lat = len(metric_cols["latency"])
+    if n_lat:
+        ax.text(0.98, 0.98, f"{n_lat} service{'s' if n_lat != 1 else ''}", transform=ax.transAxes, ha="right", va="top", fontsize=9)
     ax.grid(True, alpha=0.3)
 
     # 3. Network receive per service
     ax = axes[0, 2]
     for c in metric_cols["network_rx"]:
-        ax.plot(x, win[c] / 1e6, alpha=0.7, label=c.split("_")[0])  # MB
+        ax.plot(x, win[c] / 1e6, alpha=0.7)  # MB
     ax.set_ylabel("Network RX (MB)")
     ax.set_title("Network receive per service")
-    if metric_cols["network_rx"]:
-        ax.legend(loc="upper right", fontsize=7)
+    n_rx = len(metric_cols["network_rx"])
+    if n_rx:
+        ax.text(0.98, 0.98, f"{n_rx} service{'s' if n_rx != 1 else ''}", transform=ax.transAxes, ha="right", va="top", fontsize=9)
     ax.grid(True, alpha=0.3)
 
     # 4. Network RX+TX across services
