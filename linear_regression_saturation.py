@@ -196,6 +196,132 @@ def fit_gradient_descent(
     return theta
 
 
+def run_model2_latency(
+    win: pd.DataFrame,
+    metric_cols: dict,
+    cpu_mean: np.ndarray,
+    n_windows: int,
+    stem: str,
+):
+    """Model 2: predict latency from CPU and network. Fits on baseline only, plots actual vs predicted.
+    Returns (theta_cf_lat, theta_gd_lat, baseline_end, net_rx, net_tx, y_lat, X_fit, y_mean_lat, y_std_lat)."""
+    import matplotlib.pyplot as plt
+
+    net_rx = win[metric_cols["network_rx"]].mean(axis=1).values / 1e6
+    net_tx = win[metric_cols["network_tx"]].mean(axis=1).values / 1e6
+    lat_ms = (win["_total_latency"] / 1e3).values
+
+    X_lat = np.column_stack([np.ones(n_windows), cpu_mean, net_rx, net_tx])
+    y_lat = lat_ms
+
+    baseline_end = baseline_end_index(y_lat, percentile=75)
+    X_fit = X_lat[:baseline_end]
+    y_fit = y_lat[:baseline_end]
+
+    X_gd_fit = X_fit.copy()
+    X_gd_fit[:, 1:] = (X_gd_fit[:, 1:] - X_gd_fit[:, 1:].mean(axis=0)) / (X_gd_fit[:, 1:].std(axis=0) + 1e-8)
+    y_mean_lat = y_fit.mean()
+    y_std_lat = y_fit.std() + 1e-8
+    y_gd_fit = (y_fit - y_mean_lat) / y_std_lat
+
+    theta_cf_lat = fit_closed_form(X_fit, y_fit)
+    theta_gd_lat = fit_gradient_descent(X_gd_fit, y_gd_fit, lr=0.1, epochs=50_000)
+
+    X_gd_full = X_lat.copy()
+    X_gd_full[:, 1:] = (X_gd_full[:, 1:] - X_fit[:, 1:].mean(axis=0)) / (X_fit[:, 1:].std(axis=0) + 1e-8)
+    pred_cf_lat = X_lat @ theta_cf_lat
+    pred_gd_lat = (X_gd_full @ theta_gd_lat) * y_std_lat + y_mean_lat
+
+    fig, ax = plt.subplots(figsize=(10, 4))
+    ax.plot(np.arange(n_windows), y_lat, "k-", alpha=0.7, label="Actual latency (ms)")
+    ax.plot(np.arange(n_windows), pred_cf_lat, "C0-", alpha=0.8, label="Predicted (closed-form)")
+    ax.plot(np.arange(n_windows), pred_gd_lat, "C1--", alpha=0.8, label="Predicted (gradient descent)")
+    ax.axvline(baseline_end - 0.5, color="gray", linestyle="--", alpha=0.7, label="Baseline end (fit region)")
+    ax.set_xlabel("Window index")
+    ax.set_ylabel("Latency (ms)")
+    ax.set_title(f"Model 2: Latency from CPU & network (fit on baseline n={baseline_end}) — {stem}")
+    ax.legend()
+    ax.grid(True, alpha=0.3)
+    plt.tight_layout()
+    plt.show()
+
+    return theta_cf_lat, theta_gd_lat, baseline_end, net_rx, net_tx, y_lat, X_fit, y_mean_lat, y_std_lat
+
+
+def run_forecast_30min(
+    stem: str,
+    n_windows: int,
+    baseline_end: int,
+    cpu_mean: np.ndarray,
+    net_rx: np.ndarray,
+    net_tx: np.ndarray,
+    y_lat: np.ndarray,
+    theta_cf_lat: np.ndarray,
+    theta_gd_lat: np.ndarray,
+    X_fit: np.ndarray,
+    y_mean_lat: float,
+    y_std_lat: float,
+    minutes_ahead: int = 30,
+):
+    """End-to-end forecast: extrapolate CPU/net 30 min ahead from baseline, predict latency with Model 2, plot."""
+    import matplotlib.pyplot as plt
+
+    duration_min = scenario_duration_minutes(stem)
+    if duration_min and n_windows > 0:
+        windows_per_min = n_windows / duration_min
+        n_windows_ahead = int(round(minutes_ahead * windows_per_min))
+    else:
+        n_windows_ahead = minutes_ahead
+
+    t_baseline = np.arange(baseline_end, dtype=float)
+    cpu_b = cpu_mean[:baseline_end]
+    rx_b = net_rx[:baseline_end]
+    tx_b = net_tx[:baseline_end]
+
+    t_future = baseline_end + n_windows_ahead
+    poly_cpu = np.polyfit(t_baseline, cpu_b, 1)
+    poly_rx = np.polyfit(t_baseline, rx_b, 1)
+    poly_tx = np.polyfit(t_baseline, tx_b, 1)
+
+    cpu_30 = np.polyval(poly_cpu, t_future)
+    rx_30 = np.polyval(poly_rx, t_future)
+    tx_30 = np.polyval(poly_tx, t_future)
+
+    X_30 = np.array([[1.0, cpu_30, rx_30, tx_30]])
+    lat_30_cf = (X_30 @ theta_cf_lat).item()
+    X_30_gd = X_30.copy()
+    X_30_gd[:, 1:] = (X_30[:, 1:] - X_fit[:, 1:].mean(axis=0)) / (X_fit[:, 1:].std(axis=0) + 1e-8)
+    lat_30_gd = (X_30_gd @ theta_gd_lat).item() * y_std_lat + y_mean_lat
+
+    print(f"Forecast at t = {t_future:.0f} (~{minutes_ahead} min after baseline end):")
+    print(f"  CPU = {cpu_30:.4f},  net_rx = {rx_30:.2f} MB,  net_tx = {tx_30:.2f} MB")
+    print(f"  Predicted latency (closed-form) = {lat_30_cf:.1f} ms")
+    print(f"  Predicted latency (gradient descent) = {lat_30_gd:.1f} ms")
+
+    fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(10, 6), sharex=True)
+    t_plot = np.linspace(0, t_future + 20, 200)
+    ax1.plot(t_plot, np.polyval(poly_cpu, t_plot), "C2-", alpha=0.9, label="CPU trend (baseline fit)")
+    ax1.plot(np.arange(n_windows), cpu_mean, "k.", alpha=0.5, label="Actual CPU")
+    ax1.axvline(baseline_end - 0.5, color="gray", linestyle="--", alpha=0.7, label="Baseline end")
+    ax1.scatter([t_future], [cpu_30], color="C2", s=100, zorder=5, edgecolors="black", label=f"Forecast @ t={t_future:.0f}")
+    ax1.set_ylabel("CPU")
+    ax1.set_title("Model 1: CPU forecast 30 min ahead")
+    ax1.legend(loc="upper left")
+    ax1.grid(True, alpha=0.3)
+
+    ax2.plot(np.arange(n_windows), y_lat, "k-", alpha=0.7, label="Actual latency")
+    ax2.axvline(baseline_end - 0.5, color="gray", linestyle="--", alpha=0.7)
+    ax2.scatter([t_future], [lat_30_cf], color="C0", s=100, zorder=5, marker="o", edgecolors="black", label=f"Pred latency CF = {lat_30_cf:.0f} ms")
+    ax2.scatter([t_future], [lat_30_gd], color="C1", s=100, zorder=5, marker="s", edgecolors="black", label=f"Pred latency GD = {lat_30_gd:.0f} ms")
+    ax2.set_xlabel("Window index")
+    ax2.set_ylabel("Latency (ms)")
+    ax2.set_title("Model 2: predicted latency at forecasted CPU/net")
+    ax2.legend(loc="upper left")
+    ax2.grid(True, alpha=0.3)
+    plt.tight_layout()
+    plt.show()
+
+
 def main():
     import argparse
     parser = argparse.ArgumentParser(description="Linear regression per <c-latency> scenario (GD vs closed-form)")
