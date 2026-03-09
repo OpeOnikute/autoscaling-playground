@@ -77,6 +77,28 @@ def aggregate_by_window(df: pd.DataFrame, metric_cols: dict) -> pd.DataFrame:
     return out
 
 
+def setup_notebook(
+    data_dir: Path | None = None,
+    scenarios_dir: Path | None = None,
+) -> tuple:
+    """Resolve paths, pick first <c-latency> scenario, load aggregated window data and metric columns.
+    Returns (win, metric_cols, CHOSEN_STEM). For notebook use."""
+    data_dir = data_dir or (SCRIPT_DIR / "data" / "processed_dataset")
+    scenarios_dir = scenarios_dir or SCENARIOS_DIR
+    if not data_dir.exists():
+        raise FileNotFoundError(f"Could not find processed dataset at {data_dir}")
+    candidate_pngs = sorted(p for p in scenarios_dir.glob("*.png") if p.name.startswith(CANDIDATE_PREFIX))
+    if not candidate_pngs:
+        raise FileNotFoundError(f"No files matching {CANDIDATE_PREFIX}* in {scenarios_dir}")
+    stem = candidate_pngs[0].stem[len(CANDIDATE_PREFIX):]
+    win = load_scenario_data(data_dir, stem)
+    if win is None:
+        raise FileNotFoundError(f"Could not load scenario {stem} from {data_dir}")
+    metric_cols = find_metric_columns(win)
+    metric_cols = {k: [c for c in v if c in win.columns] for k, v in metric_cols.items()}
+    return win, metric_cols, stem
+
+
 def load_scenario_data(data_dir: Path, stem: str) -> pd.DataFrame | None:
     for service in SERVICES:
         csv_path = data_dir / service / "multi-modal-data-separate" / f"{stem}.csv"
